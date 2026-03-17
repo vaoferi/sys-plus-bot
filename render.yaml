@@ -1,0 +1,12 @@
+python_version: 3.11.0
+
+services:
+  - start: python app.py
+    restart: auto
+    env:
+      - TELEGRAM_BOT_TOKEN
+      - KEYCRM_API_KEY
+      - KEYCRM_BASE_URL
+      - TELEGRAM_ADMIN_IDS
+      - RENDER_EXTERNAL_URL
+      - PORT
