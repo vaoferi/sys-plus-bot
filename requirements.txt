@@ -1,13 +1,13 @@
 # Веб-фреймворк
 flask==3.0.0
 
-# Telegram Bot (без pydantic)
-aiogram==3.4.1
+# Telegram Bot (без pydantic!)
+python-telegram-bot==20.7
 
 # HTTP клієнт
 aiohttp==3.9.1
 
-# WSGI сервер
+# WSGI сервер  
 gunicorn==21.2.0
 
 # Змінні оточення
@@ -15,4 +15,3 @@ python-dotenv==1.0.0
 
 # HTTP запити
 requests==2.31.0
-
