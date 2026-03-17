@@ -1,5 +1,5 @@
 # Веб-фреймворк
-flask==3.0.0
+flask[async]==3.0.0
 
 # Telegram Bot (без pydantic!)
 python-telegram-bot==20.7
