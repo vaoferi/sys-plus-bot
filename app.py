@@ -1,13 +1,14 @@
 """
 Sys+ Telegram Bot з інтеграцією KeyCRM
 Бот для сповіщення про замовлення та управління клієнтами
+Використовує python-telegram-bot замість aiogram (без pydantic!)
 """
 
 import os
 import logging
-from flask import Flask, request, abort
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils.web_app import check_webapp_signature
+from flask import Flask, request
+from telegram import Update
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from keycrm_client import KeyCRMClient
 
 # Налаштування логування
@@ -16,20 +17,28 @@ logger = logging.getLogger(__name__)
 
 # Ініціалізація додатків
 app = Flask(__name__)
-bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
-dp = Dispatcher()
-keycrm = KeyCRMClient(api_key=os.getenv('KEYCRM_API_KEY'))
 
-# Глобальна змінна для webhook URL
-WEBHOOK_URL = os.getenv('RENDER_EXTERNAL_URL', 'http://localhost:5000')
+# Отримуємо токен із змінних оточення
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+KEYCRM_API_KEY = os.getenv('KEYCRM_API_KEY')
+TELEGRAM_ADMIN_IDS = [int(id.strip()) for id in os.getenv('TELEGRAM_ADMIN_IDS', '').split(',') if id.strip()]
+
+# Створюємо бота
+if TELEGRAM_BOT_TOKEN:
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    keycrm = KeyCRMClient(api_key=KEYCRM_API_KEY) if KEYCRM_API_KEY else None
+else:
+    logger.error("TELEGRAM_BOT_TOKEN not set!")
+    application = None
+    keycrm = None
 
 
 @app.route('/webhook/telegram', methods=['POST'])
 async def telegram_webhook():
     """Обробка вхідних оновлень від Telegram"""
     try:
-        update = types.Update(**request.json)
-        await dp.feed_update(bot, update)
+        update = Update.de_json(request.json, application.bot)
+        await application.process_update(update)
         return {'ok': True}
     except Exception as e:
         logger.error(f"Error processing update: {e}")
@@ -137,10 +146,9 @@ def get_admin_ids():
     return [int(id.strip()) for id in admin_ids_str.split(',') if id.strip()]
 
 
-@dp.message(lambda message: message.text == '/start')
-async def cmd_start(message: types.Message):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start"""
-    await message.answer(
+    await update.message.reply_text(
         "👋 Вітаю! Я Sys+ Bot.\n\n"
         "Доступні команди:\n"
         "/orders - Останні замовлення\n"
@@ -150,50 +158,59 @@ async def cmd_start(message: types.Message):
     )
 
 
-@dp.message(lambda message: message.text == '/orders')
-async def cmd_orders(message: types.Message):
+async def orders_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показати останні замовлення"""
     try:
+        if not keycrm:
+            await update.message.reply_text("❌ Сервіс KeyCRM недоступний")
+            return
+            
         orders = await keycrm.get_recent_orders(limit=5)
         
         if not orders:
-            await message.answer("📭 Замовлень не знайдено")
+            await update.message.reply_text("📭 Замовлень не знайдено")
             return
         
         response = "📦 <b>Останні замовлення:</b>\n\n"
         for order in orders:
             response += f"№{order['id']} - {order['total']} грн ({order['status']})\n"
         
-        await message.answer(response, parse_mode='HTML')
+        await update.message.reply_text(response, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Error fetching orders: {e}")
-        await message.answer("❌ Помилка отримання замовлень")
+        await update.message.reply_text("❌ Помилка отримання замовлень")
 
 
-@dp.message(lambda message: message.text == '/clients')
-async def cmd_clients(message: types.Message):
+async def clients_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показати клієнтів"""
     try:
+        if not keycrm:
+            await update.message.reply_text("❌ Сервіс KeyCRM недоступний")
+            return
+            
         clients = await keycrm.get_recent_clients(limit=5)
         
         if not clients:
-            await message.answer("👥 Клієнтів не знайдено")
+            await update.message.reply_text("👥 Клієнтів не знайдено")
             return
         
         response = "👤 <b>Останні клієнти:</b>\n\n"
         for client in clients:
             response += f"{client['name']} - {client.get('phone', 'N/A')}\n"
         
-        await message.answer(response, parse_mode='HTML')
+        await update.message.reply_text(response, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Error fetching clients: {e}")
-        await message.answer("❌ Помилка отримання клієнтів")
+        await update.message.reply_text("❌ Помилка отримання клієнтів")
 
 
-@dp.message(lambda message: message.text == '/stats')
-async def cmd_stats(message: types.Message):
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показати статистику"""
     try:
+        if not keycrm:
+            await update.message.reply_text("❌ Сервіс KeyCRM недоступний")
+            return
+            
         stats = await keycrm.get_statistics()
         
         response = f"""
@@ -204,16 +221,15 @@ async def cmd_stats(message: types.Message):
 👤 Клієнтів: {stats.get('total_clients', 0)}
         """
         
-        await message.answer(response, parse_mode='HTML')
+        await update.message.reply_text(response, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Error fetching stats: {e}")
-        await message.answer("❌ Помилка отримання статистики")
+        await update.message.reply_text("❌ Помилка отримання статистики")
 
 
-@dp.message(lambda message: message.text == '/help')
-async def cmd_help(message: types.Message):
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Допомога"""
-    await message.answer(
+    await update.message.reply_text(
         "ℹ️ <b>Допомога</b>\n\n"
         "Цей бот інтегрований з KeyCRM і дозволяє:\n"
         "- Отримувати сповіщення про нові замовлення\n"
@@ -224,24 +240,27 @@ async def cmd_help(message: types.Message):
         "/orders - Останні замовлення\n"
         "/clients - Клієнти\n"
         "/stats - Статистика\n"
-        "/help - Допомога"
+        "/help - Допомога",
+        parse_mode='HTML'
     )
 
 
-def setup_webhook():
-    """Налаштувати webhook для Telegram"""
-    webhook_url = f"{WEBHOOK_URL}/webhook/telegram"
+def setup_handlers():
+    """Налаштувати обробники команд"""
+    if not application:
+        return
     
-    try:
-        bot.set_webhook(webhook_url)
-        logger.info(f"Telegram webhook встановлено: {webhook_url}")
-    except Exception as e:
-        logger.error(f"Error setting Telegram webhook: {e}")
+    # Обробники команд
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("orders", orders_cmd))
+    application.add_handler(CommandHandler("clients", clients_cmd))
+    application.add_handler(CommandHandler("stats", stats_cmd))
+    application.add_handler(CommandHandler("help", help_cmd))
 
 
 if __name__ == '__main__':
-    # Налаштування webhook при запуску
-    setup_webhook()
+    # Налаштувати обробники
+    setup_handlers()
     
     # Запуск Flask сервера
     port = int(os.getenv('PORT', 5000))
