@@ -26,17 +26,22 @@ TELEGRAM_ADMIN_IDS = [int(id.strip()) for id in os.getenv('TELEGRAM_ADMIN_IDS', 
 # Створюємо бота
 if TELEGRAM_BOT_TOKEN:
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    keycrm = KeyCRMClient(api_key=KEYCRM_API_KEY) if KEYCRM_API_KEY else None
+    keycrm = KeyCRMClient(api_key=KEYCRM_API_KEY, base_url=os.getenv('KEYCRM_BASE_URL', 'https://keycrm.app/api/v2')) if KEYCRM_API_KEY else None
+    bot = application.bot
 else:
     logger.error("TELEGRAM_BOT_TOKEN not set!")
     application = None
     keycrm = None
+    bot = None
 
 
 @app.route('/webhook/telegram', methods=['POST'])
 async def telegram_webhook():
     """Обробка вхідних оновлень від Telegram"""
     try:
+        if not application:
+            logger.error("Telegram webhook: Application not initialized")
+            return {'ok': False}, 500
         update = Update.de_json(request.json, application.bot)
         await application.process_update(update)
         return {'ok': True}
